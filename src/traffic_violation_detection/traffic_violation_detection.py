@@ -7,7 +7,7 @@ import cv2
 import os
 import xml.etree.ElementTree as ET
 import time
-import pygame  # Import pygame for keyboard input handling
+import pygame
 
 # Initialize Pygame
 pygame.init()
@@ -27,12 +27,13 @@ violation_info = {
     "current_speed": 0.0
 }
 SPEED_LIMIT = 50.0  # 默认限速
-current_speed_limit = SPEED_LIMIT  # 动态限速（新增）
+current_speed_limit = SPEED_LIMIT  # 动态限速
 
 
 # Load a different map
 def load_map(map_name):
     return client.load_world(map_name)
+
 
 # Function to spawn vehicles
 def spawn_vehicles(num_vehicles, world, spawn_points):
@@ -50,14 +51,16 @@ def spawn_vehicles(num_vehicles, world, spawn_points):
 
     return spawned_vehicles
 
+
 # 获取车辆当前速度（km/h）
 def get_vehicle_speed(vehicle):
     vel = vehicle.get_velocity()
-    speed = 3.6 * np.sqrt(vel.x**2 + vel.y**2 + vel.z**2)
+    speed = 3.6 * np.sqrt(vel.x ** 2 + vel.y ** 2 + vel.z ** 2)
     return round(speed, 2)
 
+
 # ------------------------------
-# 【新增】视觉识别限速标志，动态修改限速
+# 【功能1】视觉识别限速标志，动态修改限速
 # ------------------------------
 def detect_speed_limit_sign(img_rgb):
     global current_speed_limit
@@ -80,20 +83,47 @@ def detect_speed_limit_sign(img_rgb):
     except:
         current_speed_limit = SPEED_LIMIT
 
-# 纯视觉检测红绿灯
-def detect_traffic_light_vision(img_rgb):
-    hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
-    lower_red1 = np.array([0, 100, 120])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([160, 100, 120])
-    upper_red2 = np.array([179, 255, 255])
-    mask_red = cv2.inRange(hsv, lower_red1, upper_red1) + cv2.inRange(hsv, lower_red2, upper_red2)
-    kernel = np.ones((3, 3), np.uint8)
-    mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel)
-    red_pixels = cv2.countNonZero(mask_red)
-    return red_pixels > 80
 
-# 违章判断主函数（已修改：动态限速 + 视觉红绿灯）
+# ------------------------------
+# 【功能2】纯图像视觉检测红绿灯（支持夜间/弱光优化）
+# ------------------------------
+def detect_traffic_light_vision(img_rgb):
+    """
+    优化版：支持白天 + 夜间/弱光 红绿灯检测
+    1. 自动增强暗部图像
+    2. 白天正常HSV识别
+    3. 夜间高亮发光识别
+    """
+    # 自动判断亮度：夜间/弱光自动增强
+    gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+    brightness = np.mean(gray)
+
+    # 夜间/弱光：图像亮度增强
+    if brightness < 50:
+        img_rgb = cv2.convertScaleAbs(img_rgb, alpha=1.8, beta=30)
+
+    hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
+
+    # 红色信号灯（双区间）
+    lower_red1 = np.array([0, 120, 120])
+    upper_red1 = np.array([10, 255, 255])
+    lower_red2 = np.array([160, 120, 120])
+    upper_red2 = np.array([179, 255, 255])
+
+    mask_red = cv2.inRange(hsv, lower_red1, upper_red1) + cv2.inRange(hsv, lower_red2, upper_red2)
+
+    # 去噪
+    kernel = np.ones((2, 2), np.uint8)
+    mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel)
+
+    red_pixels = cv2.countNonZero(mask_red)
+
+    # 夜间阈值降低，白天阈值提高
+    threshold = 40 if brightness < 50 else 80
+    return red_pixels > threshold
+
+
+# 违章判断主函数
 def detect_violations(vehicle, img_rgb):
     global current_speed_limit
     detect_speed_limit_sign(img_rgb)  # 识别限速牌
@@ -103,7 +133,8 @@ def detect_violations(vehicle, img_rgb):
     violation_info["red_light"] = detect_traffic_light_vision(img_rgb)
     violation_info["ignore_sign"] = False
 
-# 绘制违章信息（已加：显示当前限速）
+
+# 绘制违章信息
 def draw_violation_info(img):
     speed = violation_info["current_speed"]
     cv2.putText(img, f"Speed: {speed} km/h", (20, 50),
@@ -117,6 +148,7 @@ def draw_violation_info(img):
     if violation_info["red_light"]:
         cv2.putText(img, "VIOLATION: RED LIGHT!", (20, 200),
                     cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
+
 
 # Define the map you want to load
 world = client.load_world('Town05')
@@ -169,10 +201,12 @@ camera = world.spawn_actor(camera_bp, camera_init_trans, attach_to=vehicle)
 # Create a queue to store and retrieve the sensor data
 image_queue = queue.Queue(maxsize=50)
 
+
 # Camera listener
 def image_callback(image):
     if not image_queue.full():
         image_queue.put(image)
+
 
 camera.listen(image_callback)
 
@@ -183,6 +217,7 @@ data_path = os.path.join(project_root, "OutPut", "data01")
 output_dir = data_path
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
+
 
 # Function to get current weather parameters
 def get_weather_params(world):
@@ -198,6 +233,7 @@ def get_weather_params(world):
         "wetness": weather.wetness
     }
 
+
 # Function to build the projection matrix
 def build_projection_matrix(w, h, fov, is_behind_camera=False):
     focal = w / (2.0 * np.tan(fov * np.pi / 360.0))
@@ -212,6 +248,7 @@ def build_projection_matrix(w, h, fov, is_behind_camera=False):
     K[1, 2] = h / 2.0
     return K
 
+
 def get_image_point(loc, K, w2c):
     point = np.array([loc.x, loc.y, loc.z, 1])
     point_camera = np.dot(w2c, point)
@@ -220,6 +257,7 @@ def get_image_point(loc, K, w2c):
     point_img[0] /= point_img[2]
     point_img[1] /= point_img[2]
     return point_img[0:2]
+
 
 # Get the attributes from the camera
 image_w = camera_bp.get_attribute("image_size_x").as_int()
@@ -232,8 +270,10 @@ captured_sign_locations = set()
 last_capture_time = 0
 capture_cooldown = 5
 
+
 def dot_product(v1, v2):
     return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z
+
 
 def get_signs_bounding_boxes(vehicle_transform, camera_transform, K, world_2_camera):
     global captured_sign_locations, last_capture_time
@@ -277,6 +317,7 @@ def get_signs_bounding_boxes(vehicle_transform, camera_transform, K, world_2_cam
 
     return bounding_boxes
 
+
 # 保存XML
 def create_xml_file(image_name, bboxes, width, height, weather_params):
     annotation = ET.Element("annotation")
@@ -299,7 +340,7 @@ def create_xml_file(image_name, bboxes, width, height, weather_params):
     violation_node = ET.SubElement(annotation, "violation")
     ET.SubElement(violation_node, "speeding").text = str(violation_info["speeding"])
     ET.SubElement(violation_node, "red_light").text = str(violation_info["red_light"])
-    ET.SubElement(violation_node, "speed_limit").text = str(int(current_speed_limit))  # 保存当前限速
+    ET.SubElement(violation_node, "speed_limit").text = str(int(current_speed_limit))
 
     for bbox in bboxes:
         obj = ET.SubElement(annotation, "object")
@@ -316,6 +357,7 @@ def create_xml_file(image_name, bboxes, width, height, weather_params):
     xml_file = os.path.join(output_dir, image_name.replace(".png", ".xml"))
     tree.write(xml_file)
 
+
 # 天气切换
 weather_conditions = [
     'rainy',
@@ -323,6 +365,7 @@ weather_conditions = [
     'night',
     'foggy'
 ]
+
 
 def update_weather(world, condition):
     if condition == 'rainy':
@@ -373,6 +416,7 @@ def update_weather(world, condition):
         raise ValueError("Unknown weather condition")
     world.set_weather(weather)
 
+
 def get_weather_category(w):
     if w['cloudiness'] > 70 or w['precipitation'] > 50:
         return 0
@@ -382,6 +426,7 @@ def get_weather_category(w):
         return 2
     else:
         return 3
+
 
 # 手动控制
 def handle_input(vehicle):
@@ -408,6 +453,7 @@ def handle_input(vehicle):
 
     vehicle.apply_control(control)
 
+
 # NMS
 def compute_iou(box1, box2):
     x1 = max(box1['xmin'], box2['xmin'])
@@ -416,18 +462,19 @@ def compute_iou(box1, box2):
     y2 = min(box1['ymax'], box2['ymax'])
 
     inter_area = max(0, x2 - x1) * max(0, y2 - y1)
-    box1_area = (box1['xmax']-box1['xmin'])*(box1['ymax']-box1['ymin'])
-    box2_area = (box2['xmax']-box2['xmin'])*(box2['ymax']-box2['ymin'])
+    box1_area = (box1['xmax'] - box1['xmin']) * (box1['ymax'] - box1['ymin'])
+    box2_area = (box2['xmax'] - box2['xmin']) * (box2['ymax'] - box2['ymin'])
 
     if box1_area == 0 or box2_area == 0:
         return 0.0
     return inter_area / float(box1_area + box2_area - inter_area)
 
+
 def non_maximum_suppression(bboxes, iou_threshold=0.2):
     if len(bboxes) == 0:
         return []
 
-    bboxes = sorted(bboxes, key=lambda x: (x['xmax']-x['xmin'])*(x['ymax']-x['ymin']), reverse=True)
+    bboxes = sorted(bboxes, key=lambda x: (x['xmax'] - x['xmin']) * (x['ymax'] - x['ymin']), reverse=True)
     final_bboxes = []
 
     while bboxes:
@@ -435,6 +482,7 @@ def non_maximum_suppression(bboxes, iou_threshold=0.2):
         final_bboxes.append(current_box)
         bboxes = [box for box in bboxes if compute_iou(current_box, box) < iou_threshold]
     return final_bboxes
+
 
 # 主循环
 weather_transition_interval = 10
@@ -452,7 +500,7 @@ try:
         img = np.reshape(np.copy(image.raw_data), (image.height, image.width, 4))
         img_rgb = img[:, :, :3].astype(np.uint8)
 
-        # 核心：违章检测（动态限速 + 视觉红绿灯）
+        # 核心：违章检测
         detect_violations(vehicle, img_rgb)
 
         current_time = time.time()
@@ -469,7 +517,8 @@ try:
         if bboxes:
             img_rgb_with_bboxes = img_rgb.copy()
             for box in bboxes:
-                cv2.rectangle(img_rgb_with_bboxes, (box['xmin'], box['ymin']), (box['xmax'], box['ymax']), (0,0,255), 2)
+                cv2.rectangle(img_rgb_with_bboxes, (box['xmin'], box['ymin']), (box['xmax'], box['ymax']), (0, 0, 255),
+                              2)
             draw_violation_info(img_rgb_with_bboxes)
 
             image_name = f"image_{int(time.time())}.png"
