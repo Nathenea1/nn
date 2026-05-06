@@ -26,8 +26,7 @@ violation_info = {
     "ignore_sign": False,
     "current_speed": 0.0
 }
-SPEED_LIMIT = 50.0  # 默认限速
-current_speed_limit = SPEED_LIMIT  # 动态限速
+SPEED_LIMIT = 50.0  # 固定限速，恢复原版
 
 
 # Load a different map
@@ -60,51 +59,26 @@ def get_vehicle_speed(vehicle):
 
 
 # ------------------------------
-# 【功能1】视觉识别限速标志，动态修改限速
-# ------------------------------
-def detect_speed_limit_sign(img_rgb):
-    global current_speed_limit
-    try:
-        hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
-        lower_red = np.array([0, 100, 100])
-        upper_red = np.array([10, 255, 255])
-        mask = cv2.inRange(hsv, lower_red, upper_red)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        detected = False
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if 50 < area < 1000:
-                current_speed_limit = 30.0
-                detected = True
-                break
-        if not detected:
-            current_speed_limit = SPEED_LIMIT
-    except:
-        current_speed_limit = SPEED_LIMIT
-
-
-# ------------------------------
-# 【功能2】纯图像视觉检测红绿灯（支持夜间/弱光优化）
+# 仅保留：功能2 夜间/弱光 红绿灯识别优化
 # ------------------------------
 def detect_traffic_light_vision(img_rgb):
     """
     优化版：支持白天 + 夜间/弱光 红绿灯检测
     1. 自动增强暗部图像
     2. 白天正常HSV识别
-    3. 夜间高亮发光识别
+    3. 夜间降低阈值防止漏检
     """
-    # 自动判断亮度：夜间/弱光自动增强
+    # 计算画面平均亮度，区分白天/夜间
     gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
     brightness = np.mean(gray)
 
-    # 夜间/弱光：图像亮度增强
+    # 弱光/夜间自动提亮图像
     if brightness < 50:
         img_rgb = cv2.convertScaleAbs(img_rgb, alpha=1.8, beta=30)
 
     hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
 
-    # 红色信号灯（双区间）
+    # 红色双区间阈值
     lower_red1 = np.array([0, 120, 120])
     upper_red1 = np.array([10, 255, 255])
     lower_red2 = np.array([160, 120, 120])
@@ -112,41 +86,37 @@ def detect_traffic_light_vision(img_rgb):
 
     mask_red = cv2.inRange(hsv, lower_red1, upper_red1) + cv2.inRange(hsv, lower_red2, upper_red2)
 
-    # 去噪
+    # 形态学去噪
     kernel = np.ones((2, 2), np.uint8)
     mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel)
 
     red_pixels = cv2.countNonZero(mask_red)
 
-    # 夜间阈值降低，白天阈值提高
+    # 夜间阈值更低，白天正常阈值
     threshold = 40 if brightness < 50 else 80
     return red_pixels > threshold
 
 
-# 违章判断主函数
+# 违章判断（恢复原版固定限速，删除动态限速逻辑）
 def detect_violations(vehicle, img_rgb):
-    global current_speed_limit
-    detect_speed_limit_sign(img_rgb)  # 识别限速牌
     speed = get_vehicle_speed(vehicle)
     violation_info["current_speed"] = speed
-    violation_info["speeding"] = speed > current_speed_limit  # 动态判断
+    violation_info["speeding"] = speed > SPEED_LIMIT
     violation_info["red_light"] = detect_traffic_light_vision(img_rgb)
     violation_info["ignore_sign"] = False
 
 
-# 绘制违章信息
+# 绘制违章信息（恢复原版，删除限速值显示）
 def draw_violation_info(img):
     speed = violation_info["current_speed"]
     cv2.putText(img, f"Speed: {speed} km/h", (20, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
-    cv2.putText(img, f"Limit: {int(current_speed_limit)} km/h", (20, 100),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 0), 3)
 
     if violation_info["speeding"]:
-        cv2.putText(img, "VIOLATION: SPEEDING!", (20, 150),
+        cv2.putText(img, "VIOLATION: SPEEDING!", (20, 100),
                     cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
     if violation_info["red_light"]:
-        cv2.putText(img, "VIOLATION: RED LIGHT!", (20, 200),
+        cv2.putText(img, "VIOLATION: RED LIGHT!", (20, 150),
                     cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
 
 
@@ -227,7 +197,7 @@ def get_weather_params(world):
         "precipitation": weather.precipitation,
         "precipitation_deposits": weather.precipitation_deposits,
         "wind_intensity": weather.wind_intensity,
-        "sun_azimuth_angle": weather.sun_azimuth_angle,
+        sun_azimuth_angle: weather.sun_azimuth_angle,
         "sun_altitude_angle": weather.sun_altitude_angle,
         "fog_density": weather.fog_density,
         "wetness": weather.wetness
@@ -318,7 +288,7 @@ def get_signs_bounding_boxes(vehicle_transform, camera_transform, K, world_2_cam
     return bounding_boxes
 
 
-# 保存XML
+# 保存XML（删除多余speed_limit字段，恢复原版）
 def create_xml_file(image_name, bboxes, width, height, weather_params):
     annotation = ET.Element("annotation")
     filename = ET.SubElement(annotation, "filename")
@@ -340,7 +310,6 @@ def create_xml_file(image_name, bboxes, width, height, weather_params):
     violation_node = ET.SubElement(annotation, "violation")
     ET.SubElement(violation_node, "speeding").text = str(violation_info["speeding"])
     ET.SubElement(violation_node, "red_light").text = str(violation_info["red_light"])
-    ET.SubElement(violation_node, "speed_limit").text = str(int(current_speed_limit))
 
     for bbox in bboxes:
         obj = ET.SubElement(annotation, "object")
@@ -351,7 +320,7 @@ def create_xml_file(image_name, bboxes, width, height, weather_params):
         ET.SubElement(bndbox, "xmin").text = str(bbox['xmin'])
         ET.SubElement(bndbox, "ymin").text = str(bbox['ymin'])
         ET.SubElement(bndbox, "xmax").text = str(bbox['xmax'])
-        ET.SubElement(bndbox, "ymax").text = str(bbox['ymax'])
+        ET.SubElement(ymax, "ymax").text = str(bbox['ymax'])
 
     tree = ET.ElementTree(annotation)
     xml_file = os.path.join(output_dir, image_name.replace(".png", ".xml"))
@@ -500,7 +469,7 @@ try:
         img = np.reshape(np.copy(image.raw_data), (image.height, image.width, 4))
         img_rgb = img[:, :, :3].astype(np.uint8)
 
-        # 核心：违章检测
+        # 违章检测
         detect_violations(vehicle, img_rgb)
 
         current_time = time.time()
