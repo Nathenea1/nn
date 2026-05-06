@@ -45,9 +45,6 @@ def spawn_vehicles(num_vehicles, world, spawn_points):
         vehicle = world.try_spawn_actor(vehicle_bp, spawn_point)
         if vehicle:
             spawned_vehicles.append(vehicle)
-        else:
-            print("Failed to spawn vehicle")
-
     return spawned_vehicles
 
 
@@ -59,54 +56,18 @@ def get_vehicle_speed(vehicle):
 
 
 # ------------------------------
-# 仅保留：功能2 夜间/弱光 红绿灯识别优化
+# 【修改】违章判断：使用视觉检测红绿灯
 # ------------------------------
-def detect_traffic_light_vision(img_rgb):
-    """
-    优化版：支持白天 + 夜间/弱光 红绿灯检测
-    1. 自动增强暗部图像
-    2. 白天正常HSV识别
-    3. 夜间降低阈值防止漏检
-    """
-    # 计算画面平均亮度，区分白天/夜间
-    gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
-    brightness = np.mean(gray)
-
-    # 弱光/夜间自动提亮图像
-    if brightness < 50:
-        img_rgb = cv2.convertScaleAbs(img_rgb, alpha=1.8, beta=30)
-
-    hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
-
-    # 红色双区间阈值
-    lower_red1 = np.array([0, 120, 120])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([160, 120, 120])
-    upper_red2 = np.array([179, 255, 255])
-
-    mask_red = cv2.inRange(hsv, lower_red1, upper_red1) + cv2.inRange(hsv, lower_red2, upper_red2)
-
-    # 形态学去噪
-    kernel = np.ones((2, 2), np.uint8)
-    mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel)
-
-    red_pixels = cv2.countNonZero(mask_red)
-
-    # 夜间阈值更低，白天正常阈值
-    threshold = 40 if brightness < 50 else 80
-    return red_pixels > threshold
-
-
-# 违章判断（恢复原版固定限速，删除动态限速逻辑）
 def detect_violations(vehicle, img_rgb):
     speed = get_vehicle_speed(vehicle)
     violation_info["current_speed"] = speed
     violation_info["speeding"] = speed > SPEED_LIMIT
+    # 纯图像识别红绿灯
     violation_info["red_light"] = detect_traffic_light_vision(img_rgb)
     violation_info["ignore_sign"] = False
 
 
-# 绘制违章信息（恢复原版，删除限速值显示）
+# 绘制违章信息到画面
 def draw_violation_info(img):
     speed = violation_info["current_speed"]
     cv2.putText(img, f"Speed: {speed} km/h", (20, 50),
